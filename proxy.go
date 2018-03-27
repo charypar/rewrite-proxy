@@ -9,6 +9,8 @@ import (
 	"github.com/elazarl/goproxy"
 )
 
+// For testing purposes only, logs all requests and
+// their details
 func handler(w http.ResponseWriter, r *http.Request) {
 	method := r.Method
 	url := r.URL
