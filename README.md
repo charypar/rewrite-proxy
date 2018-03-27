@@ -8,8 +8,8 @@ This is a little experiment in HTTP proxying and
 The goal is to build a proxy that can rewrite a HTTP header.
 The incoming header is encrypted and has the following form:
 
-```json
-{ encryptedKey: "base64string", data: "base64string" }
+```
+{"encryptedKey":"base64string","data":"base64string" }
 ```
 
 The proxy will decrypt the `encryptedKey` with a HSM (using
