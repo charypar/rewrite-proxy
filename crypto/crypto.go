@@ -57,7 +57,7 @@ func ReadRSAPrivateKey(pemBlock []byte) (*rsa.PrivateKey, error) {
 func Unmarshal(jsonString []byte) (EncryptedMessage, error) {
 	token := EncryptedMessage{}
 
-	err := json.Unmarshal(jsonString, token)
+	err := json.Unmarshal(jsonString, &token)
 	if err != nil {
 		return EncryptedMessage{}, err
 	}
