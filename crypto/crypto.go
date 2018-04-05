@@ -14,6 +14,8 @@ import (
 	"fmt"
 )
 
+var noBytes []byte
+
 // ReadRSAPublicKey reads a PEM encoded public key
 func ReadRSAPublicKey(pemBlock []byte) (*rsa.PublicKey, error) {
 	block, _ := pem.Decode(pemBlock)
@@ -65,32 +67,49 @@ func Unmarshal(jsonString []byte) (EncryptedMessage, error) {
 	return token, nil
 }
 
-// Encrypt a message using an RSA public key. The message is encrypted
-// with an AES stream ocopher with a randomly generated single-use key
-// The key itself is then encrypted with RSA.
-func Encrypt(publicKey *rsa.PublicKey, message []byte) (EncryptedMessage, error) {
-	aesKey := make([]byte, 32)
-	_, err := rand.Read(aesKey)
+// RSAEncrypt encrypts a message with an RSA public key using the hashFunction
+// for padding the message
+func RSAEncrypt(key *rsa.PublicKey, hashFunction crypto.Hash, message []byte) ([]byte, error) {
+	return rsa.EncryptOAEP(hashFunction.New(), rand.Reader, key, message, make([]byte, 0))
+}
+
+// AESEncrypt encrtpys a message with a randomly generated key using the AES
+// stream cipher and returns the ciphertext and the key
+func AESEncrypt(message []byte) (ciphertext []byte, key []byte, err error) {
+	key = make([]byte, 32)
+	_, err = rand.Read(key)
 	if err != nil {
-		return EncryptedMessage{}, fmt.Errorf("error generating key: %s", err)
+		return noBytes, noBytes, fmt.Errorf("error generating key: %s", err)
 	}
 
-	block, err := aes.NewCipher(aesKey)
+	block, err := aes.NewCipher(key)
 	if err != nil {
-		return EncryptedMessage{}, fmt.Errorf("error initializing AES cipher: %s", err)
+		return noBytes, noBytes, fmt.Errorf("error initializing AES cipher: %s", err)
 	}
 
-	ciphertext := make([]byte, block.BlockSize()+len(message))
+	ciphertext = make([]byte, block.BlockSize()+len(message))
 	iv := ciphertext[:block.BlockSize()]
 
 	if _, err := rand.Read(iv); err != nil {
-		return EncryptedMessage{}, fmt.Errorf("error generating random IV: %s", err)
+		return noBytes, noBytes, fmt.Errorf("error generating random IV: %s", err)
 	}
 
 	stream := cipher.NewCFBEncrypter(block, iv)
 	stream.XORKeyStream(ciphertext[aes.BlockSize:], message)
 
-	encKey, err := rsa.EncryptOAEP(crypto.SHA256.New(), rand.Reader, publicKey, aesKey, make([]byte, 0))
+	return ciphertext, key, nil
+}
+
+// Encrypt a message using an RSA public key. The message is encrypted
+// with an AES stream ocopher with a randomly generated single-use key
+// The key itself is then encrypted with RSA.
+func Encrypt(publicKey *rsa.PublicKey, hashFunction crypto.Hash, message []byte) (EncryptedMessage, error) {
+	ciphertext, aesKey, err := AESEncrypt(message)
+	if err != nil {
+		return EncryptedMessage{}, fmt.Errorf("AES encryption failed: %s", err)
+	}
+
+	encKey, err := RSAEncrypt(publicKey, hashFunction, aesKey)
 	if err != nil {
 		return EncryptedMessage{}, fmt.Errorf("error encrypting the AES key: %s", err)
 	}
@@ -110,27 +129,34 @@ func (message EncryptedMessage) Marshal() ([]byte, error) {
 	return json.Marshal(message)
 }
 
-// Decrypt the EncryptedMessage with a given RSA private key
-func (message EncryptedMessage) Decrypt(privateKey *rsa.PrivateKey) ([]byte, error) {
-	nothing := make([]byte, 0)
+// RSADecrypt decrypts a ciphertext with a given RSA private key, using the hashFunction
+// as random oracle for padding (see crypto/rsa.DrcryptOAEP)
+func RSADecrypt(privateKey *rsa.PrivateKey, hashFunction crypto.Hash, ciphertext []byte) ([]byte, error) {
+	return rsa.DecryptOAEP(hashFunction.New(), rand.Reader, privateKey, ciphertext, noBytes)
+}
 
-	sha := crypto.SHA256.New()
-	rng := rand.Reader
-	aesKey, err := rsa.DecryptOAEP(sha, rng, privateKey, message.Key, nothing)
+// AESDecrypt decrypts a ciphertext with a given AES key
+func AESDecrypt(key []byte, ciphertext []byte) ([]byte, error) {
+	block, err := aes.NewCipher(key)
 	if err != nil {
-		return nothing, fmt.Errorf("error decrypting the AES key: %s", err)
+		return noBytes, fmt.Errorf("error initializinng AES with the message key: %s", err)
 	}
 
-	block, err := aes.NewCipher(aesKey)
-	if err != nil {
-		return nothing, fmt.Errorf("error initializinng AES with the message key: %s", err)
-	}
-
-	plaintext := make([]byte, len(message.Data)-aes.BlockSize)
-	iv := message.Data[:block.BlockSize()]
+	plaintext := make([]byte, len(ciphertext)-aes.BlockSize)
+	iv := ciphertext[:block.BlockSize()]
 
 	stream := cipher.NewCFBDecrypter(block, iv)
-	stream.XORKeyStream(plaintext, message.Data[block.BlockSize():])
+	stream.XORKeyStream(plaintext, ciphertext[block.BlockSize():])
 
 	return plaintext, nil
+}
+
+// Decrypt the EncryptedMessage with a given RSA private key
+func (message EncryptedMessage) Decrypt(privateKey *rsa.PrivateKey, hashFunction crypto.Hash) ([]byte, error) {
+	aesKey, err := RSADecrypt(privateKey, hashFunction, message.Key)
+	if err != nil {
+		return noBytes, fmt.Errorf("error decrypting the AES key: %s", err)
+	}
+
+	return AESDecrypt(aesKey, message.Data)
 }

@@ -1,6 +1,7 @@
 package crypto
 
 import (
+	"crypto"
 	"crypto/rsa"
 	"io/ioutil"
 	"math/big"
@@ -183,7 +184,7 @@ func TestEncryptMarshalUnmarshalDecrypt(t *testing.T) {
 	}
 
 	message := []byte("Hello World!")
-	encrypted, err := Encrypt(publicKey, message)
+	encrypted, err := Encrypt(publicKey, crypto.SHA256, message)
 	if err != nil {
 		t.Errorf("Encrypt() error = %s", err)
 		return
@@ -199,7 +200,7 @@ func TestEncryptMarshalUnmarshalDecrypt(t *testing.T) {
 		t.Errorf("Unmarshal() error = %s", err)
 	}
 
-	decrypted, err := unmarshalled.Decrypt(privateKey)
+	decrypted, err := unmarshalled.Decrypt(privateKey, crypto.SHA256)
 	if err != nil {
 		t.Errorf("Decrypt() error = %v", err)
 		return
