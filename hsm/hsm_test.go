@@ -9,7 +9,7 @@ import (
 	"github.com/charypar/rewrite-proxy/crypto"
 )
 
-func TestDecryptRSAOEAPsha256(t *testing.T) {
+func TestEncryptDecrypt(t *testing.T) {
 	pubKey, err := ioutil.ReadFile("../crypto/fixtures/rsa_pub.pem")
 	if err != nil {
 		t.Errorf("Cannot read public key: %s", err)
@@ -28,36 +28,41 @@ func TestDecryptRSAOEAPsha256(t *testing.T) {
 		return
 	}
 
-	tests := []struct {
-		name       string
-		ciphertext []byte
-		want       []byte
-		wantErr    bool
-	}{
-		{
-			"Decrypt AES key with HSM",
-			encrypted.Key,
-			[]byte("Hello World!"),
-			false,
-		},
+	session, err := New("/usr/local/lib/softhsm/libsofthsm2.so", 0, "1234")
+	if err != nil {
+		t.Errorf("OpenSession() error = %v", err)
+		session.Close()
+		return
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			aesKey, err := DecryptRSAOEAPsha256(tt.ciphertext, gocrypto.SHA1)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("DecryptRSAOEAPsha256() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
 
-			decrypted, err := crypto.AESDecrypt(aesKey, encrypted.Data)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("crypto.AESDecrypt() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-
-			if !reflect.DeepEqual(decrypted, tt.want) {
-				t.Errorf("DecryptRSAOEAPsha256() = %v, want %v", string(decrypted), string(tt.want))
-			}
-		})
+	key, err := session.FindKey("proxykey")
+	if err != nil {
+		t.Errorf("session.FindKey() error = %v", err)
+		session.Close()
+		return
 	}
+
+	want := []byte("Hello World!")
+
+	t.Run("Encrypt with public key, decrypt with HSM", func(t *testing.T) {
+		aesKey, err := key.DecryptOAEP(gocrypto.SHA1, encrypted.Key)
+		if err != nil {
+			t.Errorf("DecryptOAEP() error = %v", err)
+			session.Close()
+			return
+		}
+
+		decrypted, err := crypto.AESDecrypt(aesKey, encrypted.Data)
+		if err != nil {
+			t.Errorf("crypto.AESDecrypt() error = %v", err)
+			session.Close()
+			return
+		}
+
+		if !reflect.DeepEqual(decrypted, want) {
+			t.Errorf("Decrypted text = %v, want %v", string(decrypted), string(want))
+		}
+
+		session.Close()
+	})
 }
