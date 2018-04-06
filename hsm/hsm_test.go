@@ -28,10 +28,9 @@ func TestEncryptDecrypt(t *testing.T) {
 		return
 	}
 
-	session, err := New("/usr/local/lib/softhsm/libsofthsm2.so", 0, "1234")
+	session, err := New("/usr/local/lib/softhsm/libsofthsm2.so", "Test Token", "1234")
 	if err != nil {
 		t.Errorf("OpenSession() error = %v", err)
-		session.Close()
 		return
 	}
 

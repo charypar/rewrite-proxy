@@ -52,9 +52,29 @@ type Session struct {
 	session pkcs11.SessionHandle
 }
 
+func findSlot(tokenLabel string, p *pkcs11.Ctx) (uint, error) {
+	slots, err := p.GetSlotList(true)
+	if err != nil {
+		return 0, err
+	}
+
+	for i := range slots {
+		token, err := p.GetTokenInfo(slots[i])
+		if err != nil {
+			continue
+		}
+
+		if token.Label == tokenLabel {
+			return slots[i], nil
+		}
+	}
+
+	return 0, fmt.Errorf("Slot with token labeled '%s' not found", tokenLabel)
+}
+
 // New starts a HSM session using a given library (the .so binary),
 // opens the selected slot and logs in with a pin
-func New(libPath string, slot uint, pin string) (Session, error) {
+func New(libPath string, slotLabel string, pin string) (Session, error) {
 	nothing := Session{}
 	p := pkcs11.New(libPath)
 
@@ -63,13 +83,12 @@ func New(libPath string, slot uint, pin string) (Session, error) {
 		return nothing, err
 	}
 
-	slots, err := p.GetSlotList(true)
+	slotID, err := findSlot(slotLabel, p)
 	if err != nil {
 		return nothing, err
 	}
 
-	// FIXME find the _requested_ slot
-	session, err := p.OpenSession(slots[0], pkcs11.CKF_SERIAL_SESSION|pkcs11.CKF_RW_SESSION)
+	session, err := p.OpenSession(slotID, pkcs11.CKF_SERIAL_SESSION|pkcs11.CKF_RW_SESSION)
 	if err != nil {
 		return nothing, err
 	}
