@@ -1,6 +1,7 @@
 package main
 
 import (
+	gocrypto "crypto"
 	"crypto/rsa"
 	"fmt"
 	"io/ioutil"
@@ -9,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/charypar/rewrite-proxy/crypto"
+	"github.com/charypar/rewrite-proxy/hsm"
 	"github.com/elazarl/goproxy"
 )
 
@@ -61,7 +63,7 @@ func loadPublicKey(file string) (*rsa.PublicKey, error) {
 }
 
 func encryptExample(publicKey *rsa.PublicKey, message string) (string, error) {
-	encrypted, err := crypto.Encrypt(publicKey, []byte(message))
+	encrypted, err := crypto.Encrypt(publicKey, gocrypto.SHA1, []byte(message))
 	if err != nil {
 		return "", fmt.Errorf("cannot encrypt message: %s", err)
 	}
@@ -77,7 +79,7 @@ func encryptExample(publicKey *rsa.PublicKey, message string) (string, error) {
 // ---  ACTUAL PROXY IMPLEMENTATION ---
 
 type proxyHandler struct {
-	PrivateKey *rsa.PrivateKey
+	privateKey hsm.PKCS11PrivateKey
 }
 
 func (handler proxyHandler) Handle(request *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
@@ -93,7 +95,7 @@ func (handler proxyHandler) Handle(request *http.Request, ctx *goproxy.ProxyCtx)
 		return request, nil
 	}
 
-	cleartext, err := message.Decrypt(handler.PrivateKey)
+	cleartext, err := message.DecryptHSM(handler.privateKey, gocrypto.SHA1)
 	if err != nil {
 		log.Printf("could not decrypt X-Hello header, ignoring")
 		request.Header.Del("X-Hello")
@@ -106,11 +108,6 @@ func (handler proxyHandler) Handle(request *http.Request, ctx *goproxy.ProxyCtx)
 }
 
 func main() {
-	privateKey, err := loadPrivateKey("crypto/fixtures/rsa.pem")
-	if err != nil {
-		log.Fatal(err)
-	}
-
 	publicKey, err := loadPublicKey("crypto/fixtures/rsa_pub.pem")
 	if err != nil {
 		log.Fatal(err)
@@ -121,9 +118,21 @@ func main() {
 		log.Fatal(err)
 	}
 
+	session, err := hsm.New("/usr/local/lib/softhsm/libsofthsm2.so", "Test Token", "1234")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer session.Close()
+
+	privateKey, err := session.FindKey("proxykey")
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	log.Printf("Try this in an X-Hello header: \n%s\n\n", message)
 
-	handler := proxyHandler{PrivateKey: privateKey}
+	handler := proxyHandler{privateKey: privateKey}
+
 	proxy := goproxy.NewProxyHttpServer()
 	proxy.OnRequest().Do(handler)
 
