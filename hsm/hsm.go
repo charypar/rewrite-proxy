@@ -55,7 +55,7 @@ type Session struct {
 func findSlot(tokenLabel string, p *pkcs11.Ctx) (uint, error) {
 	slots, err := p.GetSlotList(true)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("unable to get HSM slot list %s", err)
 	}
 
 	for i := range slots {
@@ -69,7 +69,7 @@ func findSlot(tokenLabel string, p *pkcs11.Ctx) (uint, error) {
 		}
 	}
 
-	return 0, fmt.Errorf("Slot with token labeled '%s' not found", tokenLabel)
+	return 0, fmt.Errorf("slot with token labeled '%s' not found", tokenLabel)
 }
 
 // New starts a HSM session using a given library (the .so binary),
@@ -80,7 +80,7 @@ func New(libPath string, slotLabel string, pin string) (Session, error) {
 
 	err := p.Initialize()
 	if err != nil {
-		return nothing, err
+		return nothing, fmt.Errorf("cannot initialise a HSM connection: %s", err)
 	}
 
 	slotID, err := findSlot(slotLabel, p)
@@ -90,12 +90,12 @@ func New(libPath string, slotLabel string, pin string) (Session, error) {
 
 	session, err := p.OpenSession(slotID, pkcs11.CKF_SERIAL_SESSION|pkcs11.CKF_RW_SESSION)
 	if err != nil {
-		return nothing, err
+		return nothing, fmt.Errorf("cannot start a HSM session: %s", err)
 	}
 
 	err = p.Login(session, pkcs11.CKU_USER, "1234")
 	if err != nil {
-		return nothing, err
+		return nothing, fmt.Errorf("cannot log in with a HSM: %s", err)
 	}
 
 	return Session{ctx: p, session: session}, nil
@@ -117,12 +117,12 @@ func (session Session) FindKey(label string) (PKCS11PrivateKey, error) {
 
 	err := p.FindObjectsInit(s, []*pkcs11.Attribute{pkcs11.NewAttribute(pkcs11.CKA_LABEL, label)})
 	if err != nil {
-		return nothing, err
+		return nothing, fmt.Errorf("Cannot find private key with label %s: %s", label, err)
 	}
 
 	handles, _, err := p.FindObjects(s, 1)
 	if err != nil {
-		return nothing, err
+		return nothing, fmt.Errorf("Cannot find private key with label %s: %s", label, err)
 	}
 	p.FindObjectsFinal(s)
 
