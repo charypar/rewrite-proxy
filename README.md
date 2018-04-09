@@ -68,6 +68,7 @@ $ softhsm2-util --import crypto/fixtures/rsa.pk8 --no-public-key --slot 0 --labe
 Now you should be able to run tests!
 
 ```
+$ make install
 $ go test ./...
 ```
 
