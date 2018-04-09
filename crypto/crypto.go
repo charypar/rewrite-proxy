@@ -12,6 +12,8 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+
+	"github.com/charypar/rewrite-proxy/hsm"
 )
 
 var noBytes []byte
@@ -95,7 +97,7 @@ func AESEncrypt(message []byte) (ciphertext []byte, key []byte, err error) {
 	}
 
 	stream := cipher.NewCFBEncrypter(block, iv)
-	stream.XORKeyStream(ciphertext[aes.BlockSize:], message)
+	stream.XORKeyStream(ciphertext[block.BlockSize():], message)
 
 	return ciphertext, key, nil
 }
@@ -142,7 +144,7 @@ func AESDecrypt(key []byte, ciphertext []byte) ([]byte, error) {
 		return noBytes, fmt.Errorf("error initializinng AES with the message key: %s", err)
 	}
 
-	plaintext := make([]byte, len(ciphertext)-aes.BlockSize)
+	plaintext := make([]byte, len(ciphertext)-block.BlockSize())
 	iv := ciphertext[:block.BlockSize()]
 
 	stream := cipher.NewCFBDecrypter(block, iv)
@@ -154,6 +156,16 @@ func AESDecrypt(key []byte, ciphertext []byte) ([]byte, error) {
 // Decrypt the EncryptedMessage with a given RSA private key
 func (message EncryptedMessage) Decrypt(privateKey *rsa.PrivateKey, hashFunction crypto.Hash) ([]byte, error) {
 	aesKey, err := RSADecrypt(privateKey, hashFunction, message.Key)
+	if err != nil {
+		return noBytes, fmt.Errorf("error decrypting the AES key: %s", err)
+	}
+
+	return AESDecrypt(aesKey, message.Data)
+}
+
+// DecryptHSM decrypts the EncryptedMessage with a private key stored in a HSM
+func (message EncryptedMessage) DecryptHSM(privateKey hsm.PKCS11PrivateKey, hashFunction crypto.Hash) ([]byte, error) {
+	aesKey, err := privateKey.DecryptOAEP(hashFunction, message.Key)
 	if err != nil {
 		return noBytes, fmt.Errorf("error decrypting the AES key: %s", err)
 	}
