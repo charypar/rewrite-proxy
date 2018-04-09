@@ -29,7 +29,7 @@ func concat(slices ...[]byte) []byte {
 	return r
 }
 
-func pkcs11hash(hashFunction crypto.Hash) (hashAlg uint, mfg uint, err error) {
+func pkcs11hash(hashFunction crypto.Hash) (hashAlg uint, mgf uint, err error) {
 	switch hashFunction {
 	case crypto.SHA1:
 		return pkcs11.CKM_SHA_1, pkcs11.CKG_MGF1_SHA1, nil
@@ -93,7 +93,7 @@ func New(libPath string, slotLabel string, pin string) (Session, error) {
 		return nothing, fmt.Errorf("cannot start a HSM session: %s", err)
 	}
 
-	err = p.Login(session, pkcs11.CKU_USER, "1234")
+	err = p.Login(session, pkcs11.CKU_USER, pin)
 	if err != nil {
 		return nothing, fmt.Errorf("cannot log in with a HSM: %s", err)
 	}
@@ -109,6 +109,12 @@ func (session Session) Close() {
 	session.ctx.Finalize()
 }
 
+// PKCS11PrivateKey represents a Private Key in the HSM
+type PKCS11PrivateKey struct {
+	session Session
+	handle  pkcs11.ObjectHandle
+}
+
 // FindKey finda a key with a given label and returns it
 func (session Session) FindKey(label string) (PKCS11PrivateKey, error) {
 	nothing := PKCS11PrivateKey{}
@@ -116,6 +122,7 @@ func (session Session) FindKey(label string) (PKCS11PrivateKey, error) {
 	s := session.session
 
 	err := p.FindObjectsInit(s, []*pkcs11.Attribute{pkcs11.NewAttribute(pkcs11.CKA_LABEL, label)})
+	defer p.FindObjectsFinal(s)
 	if err != nil {
 		return nothing, fmt.Errorf("Cannot find private key with label %s: %s", label, err)
 	}
@@ -124,15 +131,8 @@ func (session Session) FindKey(label string) (PKCS11PrivateKey, error) {
 	if err != nil {
 		return nothing, fmt.Errorf("Cannot find private key with label %s: %s", label, err)
 	}
-	p.FindObjectsFinal(s)
 
 	return PKCS11PrivateKey{session, handles[0]}, nil
-}
-
-// PKCS11PrivateKey represents a Private Key in the HSM
-type PKCS11PrivateKey struct {
-	session Session
-	handle  pkcs11.ObjectHandle
 }
 
 // DecryptOAEP uses the private key to decrypt a message using a given hash
@@ -157,6 +157,7 @@ func (key PKCS11PrivateKey) DecryptOAEP(hash crypto.Hash, ciphertext []byte) ([]
 
 	mechanism := []*pkcs11.Mechanism{pkcs11.NewMechanism(pkcs11.CKM_RSA_PKCS_OAEP, OEAPParams)}
 	err = p.DecryptInit(s, mechanism, key.handle)
+	defer p.DecryptFinal(s)
 	if err != nil {
 		return noBytes, fmt.Errorf("could not initialse decryption: %s", err)
 	}
@@ -165,8 +166,6 @@ func (key PKCS11PrivateKey) DecryptOAEP(hash crypto.Hash, ciphertext []byte) ([]
 	if err != nil {
 		return noBytes, fmt.Errorf("could not decrypt: %s", err)
 	}
-
-	p.DecryptFinal(s)
 
 	return plaintext, nil
 }

@@ -97,7 +97,7 @@ func AESEncrypt(message []byte) (ciphertext []byte, key []byte, err error) {
 	}
 
 	stream := cipher.NewCFBEncrypter(block, iv)
-	stream.XORKeyStream(ciphertext[aes.BlockSize:], message)
+	stream.XORKeyStream(ciphertext[block.BlockSize():], message)
 
 	return ciphertext, key, nil
 }
@@ -144,7 +144,7 @@ func AESDecrypt(key []byte, ciphertext []byte) ([]byte, error) {
 		return noBytes, fmt.Errorf("error initializinng AES with the message key: %s", err)
 	}
 
-	plaintext := make([]byte, len(ciphertext)-aes.BlockSize)
+	plaintext := make([]byte, len(ciphertext)-block.BlockSize())
 	iv := ciphertext[:block.BlockSize()]
 
 	stream := cipher.NewCFBDecrypter(block, iv)
