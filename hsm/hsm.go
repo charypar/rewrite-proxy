@@ -29,21 +29,21 @@ func concat(slices ...[]byte) []byte {
 	return r
 }
 
+var pkcs11hashes = map[crypto.Hash][]uint{
+	crypto.SHA1:   []uint{pkcs11.CKM_SHA_1, pkcs11.CKG_MGF1_SHA1},
+	crypto.SHA224: []uint{pkcs11.CKM_SHA224, pkcs11.CKG_MGF1_SHA224},
+	crypto.SHA256: []uint{pkcs11.CKM_SHA256, pkcs11.CKG_MGF1_SHA256},
+	crypto.SHA384: []uint{pkcs11.CKM_SHA384, pkcs11.CKG_MGF1_SHA384},
+	crypto.SHA512: []uint{pkcs11.CKM_SHA512, pkcs11.CKG_MGF1_SHA512},
+}
+
 func pkcs11hash(hashFunction crypto.Hash) (hashAlg uint, mgf uint, err error) {
-	switch hashFunction {
-	case crypto.SHA1:
-		return pkcs11.CKM_SHA_1, pkcs11.CKG_MGF1_SHA1, nil
-	case crypto.SHA224:
-		return pkcs11.CKM_SHA224, pkcs11.CKG_MGF1_SHA224, nil
-	case crypto.SHA256:
-		return pkcs11.CKM_SHA256, pkcs11.CKG_MGF1_SHA256, nil
-	case crypto.SHA384:
-		return pkcs11.CKM_SHA384, pkcs11.CKG_MGF1_SHA384, nil
-	case crypto.SHA512:
-		return pkcs11.CKM_SHA512, pkcs11.CKG_MGF1_SHA512, nil
-	default:
+	hf, ok := pkcs11hashes[hashFunction]
+	if ok != true {
 		return 0, 0, errors.New("unsuported hash algorithm")
 	}
+
+	return hf[0], hf[1], nil
 }
 
 // Session is an open session with a Hardware Security Module
@@ -115,7 +115,7 @@ type PKCS11PrivateKey struct {
 	handle  pkcs11.ObjectHandle
 }
 
-// FindKey finda a key with a given label and returns it
+// FindKey finds a key with a given label and returns it
 func (session Session) FindKey(label string) (PKCS11PrivateKey, error) {
 	nothing := PKCS11PrivateKey{}
 	p := session.ctx
@@ -135,6 +135,25 @@ func (session Session) FindKey(label string) (PKCS11PrivateKey, error) {
 	return PKCS11PrivateKey{session, handles[0]}, nil
 }
 
+// oaepParams holds parameters for RSA encrypt/decrypt with OAEP padding scheme
+type oaepParams struct {
+	HashAlg      uint
+	Mgf          uint
+	Source       uint
+	PSourceData  uint
+	SourcDataLen uint
+}
+
+func (params oaepParams) Bytes() []byte {
+	return concat(
+		ulongToBytes(params.HashAlg),
+		ulongToBytes(params.Mgf),
+		ulongToBytes(params.Source),
+		ulongToBytes(params.PSourceData),
+		ulongToBytes(params.SourcDataLen),
+	)
+}
+
 // DecryptOAEP uses the private key to decrypt a message using a given hash
 // for message padding
 func (key PKCS11PrivateKey) DecryptOAEP(hash crypto.Hash, ciphertext []byte) ([]byte, error) {
@@ -147,15 +166,8 @@ func (key PKCS11PrivateKey) DecryptOAEP(hash crypto.Hash, ciphertext []byte) ([]
 		return noBytes, fmt.Errorf("cannot select a hash function: %s", err)
 	}
 
-	OEAPParams := concat(
-		ulongToBytes(hashAlg),
-		ulongToBytes(mgf),
-		ulongToBytes(pkcs11.CKZ_DATA_SPECIFIED),
-		ulongToBytes(0),
-		ulongToBytes(0),
-	)
-
-	mechanism := []*pkcs11.Mechanism{pkcs11.NewMechanism(pkcs11.CKM_RSA_PKCS_OAEP, OEAPParams)}
+	params := oaepParams{hashAlg, mgf, pkcs11.CKZ_DATA_SPECIFIED, 0, 0}
+	mechanism := []*pkcs11.Mechanism{pkcs11.NewMechanism(pkcs11.CKM_RSA_PKCS_OAEP, params.Bytes())}
 	err = p.DecryptInit(s, mechanism, key.handle)
 	defer p.DecryptFinal(s)
 	if err != nil {

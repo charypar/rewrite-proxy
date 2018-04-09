@@ -102,7 +102,7 @@ func (handler proxyHandler) Handle(request *http.Request, ctx *goproxy.ProxyCtx)
 		return request, nil
 	}
 
-	request.Header.Set("X-Hello", fmt.Sprintf("Client said: %s", string(cleartext)))
+	request.Header.Set("X-Hello", string(cleartext))
 
 	return request, nil
 }
