@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/caarlos0/env"
 	"github.com/charypar/rewrite-proxy/crypto"
 	"github.com/charypar/rewrite-proxy/hsm"
 	"github.com/elazarl/goproxy"
@@ -76,38 +77,7 @@ func encryptExample(publicKey *rsa.PublicKey, message string) (string, error) {
 	return string(marshalled), nil
 }
 
-// ---  ACTUAL PROXY IMPLEMENTATION ---
-
-type proxyHandler struct {
-	privateKey hsm.PKCS11PrivateKey
-}
-
-func (handler proxyHandler) Handle(request *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
-	ciphertext := request.Header.Get("X-Hello")
-	if len(ciphertext) < 1 {
-		return request, nil
-	}
-
-	message, err := crypto.Unmarshal([]byte(ciphertext))
-	if err != nil {
-		log.Printf("could not parse X-Hello header, ignoring")
-		request.Header.Del("X-Hello")
-		return request, nil
-	}
-
-	cleartext, err := message.DecryptHSM(handler.privateKey, gocrypto.SHA1)
-	if err != nil {
-		log.Printf("could not decrypt X-Hello header, ignoring")
-		request.Header.Del("X-Hello")
-		return request, nil
-	}
-
-	request.Header.Set("X-Hello", string(cleartext))
-
-	return request, nil
-}
-
-func main() {
+func printTestMessage(headerName string) {
 	publicKey, err := loadPublicKey("crypto/fixtures/rsa_pub.pem")
 	if err != nil {
 		log.Fatal(err)
@@ -118,30 +88,83 @@ func main() {
 		log.Fatal(err)
 	}
 
-	session, err := hsm.New("/usr/local/lib/softhsm/libsofthsm2.so", "Test Token", "1234")
+	log.Printf("Try this in an %s header: \n%s\n\n", headerName, message)
+}
+
+// ---  ACTUAL PROXY IMPLEMENTATION ---
+
+type proxyHandler struct {
+	privateKey hsm.PKCS11PrivateKey
+	headerName string
+}
+
+func (handler proxyHandler) Handle(request *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
+	ciphertext := request.Header.Get(handler.headerName)
+	if len(ciphertext) < 1 {
+		return request, nil
+	}
+
+	message, err := crypto.Unmarshal([]byte(ciphertext))
+	if err != nil {
+		log.Printf("could not parse %s header, ignoring", handler.headerName)
+		request.Header.Del(handler.headerName)
+		return request, nil
+	}
+
+	cleartext, err := message.DecryptHSM(handler.privateKey, gocrypto.SHA1)
+	if err != nil {
+		log.Printf("could not decrypt %s header, ignoring", handler.headerName)
+		request.Header.Del(handler.headerName)
+		return request, nil
+	}
+
+	request.Header.Set(handler.headerName, string(cleartext))
+
+	return request, nil
+}
+
+// https://github.com/caarlos0/env
+type proxyConfig struct {
+	LibHSMPath string `env:"LIB_HSM_PATH,required"`
+	SlotLabel  string `env:"SLOT_LABEL,required"`
+	SlotPIN    string `env:"SLOT_PIN,required"`
+	KeyLabel   string `env:"KEY_LABEL,required"`
+	HeaderName string `env:"HEADER_NAME,required"`
+	Port       string `env:"PORT,required"`
+	TestPort   string `env:"TEST_PORT" envDefault:"8080"`
+}
+
+func main() {
+	config := proxyConfig{}
+	err := env.Parse(&config)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	session, err := hsm.New(config.LibHSMPath, config.SlotLabel, config.SlotPIN)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer session.Close()
 
-	privateKey, err := session.FindKey("proxykey")
+	privateKey, err := session.FindKey(config.KeyLabel)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	log.Printf("Try this in an X-Hello header: \n%s\n\n", message)
-
-	handler := proxyHandler{privateKey: privateKey}
+	handler := proxyHandler{privateKey: privateKey, headerName: config.HeaderName}
 
 	proxy := goproxy.NewProxyHttpServer()
 	proxy.OnRequest().Do(handler)
 
+	printTestMessage(config.HeaderName)
+
 	// start the proxy
 	go func() {
-		log.Print("proxy listening on 3128\n")
-		log.Fatal(http.ListenAndServe(":3128", proxy))
+		log.Printf("proxy listening on %s\n", config.Port)
+		log.Fatal(http.ListenAndServe(":"+config.Port, proxy))
 	}()
 
 	// act as a server backend too for testing.
-	log.Fatal(http.ListenAndServe(":8080", http.HandlerFunc(debugHandler)))
+	log.Fatal(http.ListenAndServe(":"+config.TestPort, http.HandlerFunc(debugHandler)))
 }
